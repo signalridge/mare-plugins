@@ -235,10 +235,10 @@ return function(ctx, plan_mode_of)
 				type(interval) ~= "number"
 				or interval % 1 ~= 0
 				or interval < policy.minimum
-				or interval > 9007199254740991
+				or interval >= policy.lifetime
 			)
 		then
-			return nil, "Fixed interval must be at least 60000 ms and a safe integer"
+			return nil, "Fixed interval must be at least 60000 ms and less than the 7-day task lifetime"
 		end
 		local info, now = ctx.session:info(), mare.task.now()
 		if info.readonly or info.unstable or info.resume_error or ctx.session:switching() then
