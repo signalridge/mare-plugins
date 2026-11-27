@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -14,13 +15,147 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+      specs: ${{ steps.classify.outputs.specs }}
+      docs: ${{ steps.classify.outputs.docs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Classify changed paths
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          python3 - <<'PY'
+          import fnmatch
+          import os
+          import subprocess
+
+          GROUPS = ("code", "specs", "docs")
+          ZERO_SHA = "0" * 40
+          IMAGE_EXTS = (".png", ".svg", ".gif", ".webp", ".jpg", ".jpeg", ".ico", ".mp4", ".cast")
+
+          def git(*args: str) -> subprocess.CompletedProcess[str]:
+              return subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+
+          def write_outputs(flags: dict[str, bool], reason: str) -> None:
+              print(f"plugins-changes: {reason}")
+              lines = [f"{k}={'true' if flags[k] else 'false'}" for k in GROUPS]
+              print("\n".join(lines))
+              out = os.environ.get("GITHUB_OUTPUT")
+              if out:
+                  with open(out, "a", encoding="utf-8") as fh:
+                      fh.write("\n".join(lines) + "\n")
+
+          def all_true(reason: str) -> None:
+              write_outputs({k: True for k in GROUPS}, reason)
+
+          def changed_files(base: str) -> list[str] | None:
+              if git("cat-file", "-e", f"{base}^{{commit}}").returncode != 0:
+                  if git("fetch", "--no-tags", "--depth=1", "origin", base).returncode != 0:
+                      return None
+              res = git("diff", "--name-only", "--no-renames", "-z", base, "HEAD", "--")
+              if res.returncode != 0:
+                  return None
+              return [p for p in res.stdout.split("\0") if p]
+
+          def classify(files: list[str]) -> dict[str, bool]:
+              flags = {k: False for k in GROUPS}
+              for path in files:
+                  matched = False
+                  if path in (".github/workflows/ci.yml", ".mare-version", ".github/ci-tools.json"):
+                      return {k: True for k in GROUPS}
+                  is_plugin_readme = fnmatch.fnmatch(path, "plugins/*/README*.md")
+                  is_image = path.lower().endswith(IMAGE_EXTS)
+                  if (
+                      (path.startswith("plugins/") and not is_plugin_readme and not is_image)
+                      or path.startswith(("types/", "tests/", "themes/"))
+                      or path == "scripts/lua_api_rules.py"
+                  ):
+                      flags["code"] = True
+                      flags["specs"] = True
+                      matched = True
+                  if (
+                      path.startswith(("scripts/", ".github/"))
+                      or path in (
+                          "plugins.toml",
+                          "mare-plugin.toml",
+                          "justfile",
+                          ".release-please-manifest.json",
+                          "release-please-config.json",
+                          "CHANGELOG.md",
+                          "NEWS.md",
+                      )
+                  ):
+                      flags["code"] = True
+                      matched = True
+                  if (
+                      is_plugin_readme
+                      or is_image
+                      or path.startswith("docs/")
+                      or fnmatch.fnmatch(path, "README*.md")
+                      or path in (
+                          "CONTRIBUTING.md",
+                          "SECURITY.md",
+                          "THIRD_PARTY_NOTICES.md",
+                          "LICENSE",
+                          ".gitignore",
+                      )
+                  ):
+                      flags["docs"] = True
+                      matched = True
+                  if not matched:
+                      return {k: True for k in GROUPS}
+              return flags
+
+          event = os.environ.get("EVENT_NAME", "")
+          if event == "workflow_dispatch":
+              all_true("workflow_dispatch runs full CI")
+          elif event == "pull_request":
+              if git("rev-parse", "--verify", "HEAD^2").returncode == 0:
+                  files = changed_files("HEAD^1")
+              else:
+                  base = os.environ.get("PR_BASE_SHA", "")
+                  files = changed_files(base) if base else None
+              if not files:
+                  all_true("unable to resolve PR diff; running full CI")
+              else:
+                  print(f"changed files ({len(files)}): {files}")
+                  write_outputs(classify(files), "pull_request path classification")
+          elif event == "push":
+              before = os.environ.get("PUSH_BEFORE_SHA", "")
+              has_parent = git("rev-parse", "--verify", "HEAD^1").returncode == 0
+              if not has_parent or not before or before == ZERO_SHA:
+                  all_true("orphan or initial push has no diff base; running full CI")
+              else:
+                  files = changed_files(before)
+                  if not files:
+                      all_true("unable to diff push base; running full CI")
+                  else:
+                      print(f"changed files ({len(files)}): {files}")
+                      write_outputs(classify(files), "push path classification")
+          else:
+              all_true(f"event {event!r} runs full CI")
+          PY
+
   verify:
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Load pinned CI tool versions
+        if: needs.changes.outputs.code == 'true'
         id: tools
         shell: bash
         run: |
@@ -35,6 +170,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Install Lua and ast-grep
+        if: needs.changes.outputs.code == 'true'
         shell: bash
         env:
           AST_GREP_VER: ${{ steps.tools.outputs.ast_grep_version }}
@@ -57,12 +193,14 @@ jobs:
           echo "${tools_dir}/bin" >> "$GITHUB_PATH"
 
       - uses: JohnnyMorganz/stylua-action@76fd70c03e6340ceaf673366712db9b20560b402 # v5
+        if: needs.changes.outputs.code == 'true'
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           version: ${{ steps.tools.outputs.stylua }}
           args: --check plugins types tests
 
       - name: Validate manifests, contracts, CI policy, and Lua public API
+        if: needs.changes.outputs.code == 'true'
         run: |
           python3 tests/manifests.py
           python3 tests/test_manifests.py
@@ -115,6 +253,8 @@ jobs:
     # `skipped` status instead of silently passing green. Once `v1.0.0` is
     # published (or if `.mare-version` points to any other missing tag), a 404
     # fails CI immediately.
+    needs: [changes]
+    if: needs.changes.outputs.specs == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -214,9 +354,10 @@ jobs:
           archive="mare-${MARE_VER}-x86_64-unknown-linux-gnu.tar.gz"
           curl -fsSL -o "${tools_dir}/checksums.txt" "${base_url}/checksums.txt"
           curl -fsSL -o "${tools_dir}/checksums.txt.sigstore.json" "${base_url}/checksums.txt.sigstore.json"
+          cert_id="https://github.com/signalridge/mare/.github/workflows/release.yaml@refs/tags/${MARE_VER}"
           cosign verify-blob \
             --bundle "${tools_dir}/checksums.txt.sigstore.json" \
-            --certificate-identity "https://github.com/signalridge/mare/.github/workflows/release.yaml@refs/tags/${MARE_VER}" \
+            --certificate-identity "${cert_id}" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             "${tools_dir}/checksums.txt"
 
