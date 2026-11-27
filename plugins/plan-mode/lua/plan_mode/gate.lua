@@ -175,6 +175,12 @@ return function(cfg, state, options_of, ctx)
 				reason = "This tool runs outside the local sandbox and may have side effects that plan mode cannot block",
 			}
 		end
+		if name == "todo_write" then
+			return {
+				decision = "deny",
+				reason = "todo_write is a checklist tool and cannot run in plan mode",
+			}
+		end
 		if info and info.side_effect == "write" then
 			return {
 				decision = "deny",

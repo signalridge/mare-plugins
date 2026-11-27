@@ -14,7 +14,7 @@ Reference for the 20 plugins in `mare-plugins`: manifest metadata, slash command
 
 - **Lua-only service contracts (`expose = "lua"`)**: All 11 add-on service contracts (`btw`, `codemode`, `goals`, `plan_mode`, `presets`, `schedule`, `secrets`, `session_title`, `team`, `terminals`, `todo`) set `expose = "lua"`. `scope = "host"` controls lifetime and ownership rather than RPC access; direct RPC calls such as `goals.pause` are rejected (`method_not_found` / not exported).
 - **Optional dependency following**: Plugins dynamically follow optional services when loaded and degrade when absent:
-  - `goal`, `schedule`, and `todo` follow optional `plan_mode`.
+  - `goal` and `schedule` follow optional `plan_mode`.
   - `plan-mode` follows optional `usage` (omits the context-usage label in the review dialog when absent).
   - `codemode` follows optional `context` and `commands`.
   - `terminals` follows optional `jobs` (required for `run_in_background = true`).
@@ -68,7 +68,7 @@ Session-scoped planning mode with an active local-write gate and plan review too
   - `section` (`string`): system prompt policy text injected while plan mode is active.
   - `plan_effort` (`string | nil`, default `nil`): optional reasoning effort level applied in plan mode.
   - `effort_scope` (`"plan" | "global"`, default `"plan"`): scope of reasoning effort overrides.
-  - `enforce` (`boolean`, default `true`): enforce local-write denial (including `subagent`, `subagent_steer`, `workflow`, `terminal_*`, `job_write`, and `job_kill`), per-call prompts on `peer_send` and `unconfined` tools, and `read-only` sandboxing on confined shells and external tools; `false` falls back to soft guidance.
+  - `enforce` (`boolean`, default `true`): enforce local-write denial (including `todo_write`, `subagent`, `subagent_steer`, `workflow`, `terminal_*`, `job_write`, and `job_kill`), per-call prompts on `peer_send` and `unconfined` tools, and `read-only` sandboxing on confined shells and external tools; `false` falls back to soft guidance.
   - `allow_tools` (`string[]`, default `{}`): tools exempted from the plan-mode gate alongside `exit_plan_mode`.
 
 ### `schedule`
@@ -125,11 +125,11 @@ Shared multi-agent task board with directed acyclic dependencies, exclusive owne
 Whole-list task checklists with diff tracking, collapsible UI progress widget, and `plan-mode` guard.
 
 - **Category**: `agent` (`provide = { "todo" }`)
-- **Injects**: `tools`, `session`, `context`, `commands`, `ui`, `agent`, `policy` (follows optional `plan_mode`)
+- **Injects**: `tools`, `session`, `context`, `commands`, `ui`, `agent`, `policy`
 - **Tool**: `todo_write`
   - Required: `todos` (complete array replacing any previous list; pass `[]` to clear). Each entry requires `content` (`string`) and `status` (`"pending" | "in_progress" | "completed"`).
   - Optional: `explanation` (`string`).
-  - Rejects writes in child sessions (`tool_context_unavailable`), read-only sessions (`readonly_session`), or while `plan_mode` is active (`plan_mode_active`).
+  - Rejects writes in child sessions (`tool_context_unavailable`), read-only sessions (`readonly_session`), or when blocked by the `plan-mode` gate while `plan_mode` is active with `enforce = true` (`todo_write` is excluded from plan mode unless `enforce = false` or listed in `allow_tools`).
 - **Command**: `/todos [expand|collapse|toggle]`
 - **Service (`todo`, `expose = "lua"`)**: `snapshot` (`session` scope)
 - **Options**:

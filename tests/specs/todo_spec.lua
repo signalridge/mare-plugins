@@ -232,7 +232,7 @@ describe("todo", function()
 		expect.eq(inserted.counts.updated, 0)
 	end)
 
-	it("rejects stale sessions, invalid config, plan mode, and child mode", function()
+	it("rejects stale sessions, invalid config, and child mode", function()
 		switch_during_write = true
 		local stale_res = put("stale")
 		expect.truthy(stale_res.is_error)
@@ -248,16 +248,6 @@ describe("todo", function()
 		expect.error(function()
 			tool.execute({ todos = mare.json.array({ { content = "x", status = "pending" } }), explanation = 123 })
 		end)
-
-		ctx.plan_mode = {
-			active = function()
-				return true
-			end,
-		}
-		local pm_res = put("in-plan-mode")
-		expect.truthy(pm_res.is_error)
-		expect.eq(pm_res.error_code, "plan_mode_active")
-		ctx.plan_mode = nil
 
 		records = {}
 		events["session/changed"]()

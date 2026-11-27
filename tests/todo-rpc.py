@@ -342,10 +342,7 @@ try:
     c.prompt("Plan the task", wait=True)
     assert c.show()["items"] == []
     events_json = json.dumps(c.events)
-    assert (
-        "cannot run in plan mode" in events_json
-        or "Local writes are blocked in plan mode" in events_json
-    ), c.events
+    assert "todo_write is a checklist tool and cannot run in plan mode" in events_json, c.events
     c.call("commands.run", {"line": "/plan off"})
     c.prompt("Execute the task", wait=True)
     assert c.show()["items"][0]["label"] == "[ ] allowed after leaving plan mode"
