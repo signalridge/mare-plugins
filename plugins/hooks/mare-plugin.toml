@@ -36,5 +36,4 @@ hooks = [
     "compact/before",
     "compact/completed",
     "trust/changed",
-    "app/ready",
 ]

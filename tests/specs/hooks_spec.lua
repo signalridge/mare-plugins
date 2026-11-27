@@ -590,6 +590,41 @@ describe("hooks", function()
 		local status_res = S.commands_reg.hooks.run("status")
 		expect.truthy(status_res.summary:find("[INACTIVE]", 1, true))
 		expect.truthy(status_res.summary:find("[ON]", 1, true))
+
+		-- Explicitly disabled unsupported hook on PreToolUse skips enforcement, omits "fail closed", and shows skipped.
+		setup("claude-code")
+		S.config.sources[1].hooks = {
+			PreToolUse = {
+				{
+					matcher = "probe",
+					hooks = { { type = "http", url = "https://policy.example.invalid/check", enabled = false } },
+				},
+			},
+		}
+		plugin.apply(ctx, S.config)
+		expect.eq(#S.notifications, 1)
+		expect.falsy(S.notifications[1].text:find("fail closed", 1, true))
+		expect.eq(vote().decision, "allow")
+		expect.eq(S.runs, 0)
+		local disabled_status = S.commands_reg.hooks.run("status")
+		expect.truthy(disabled_status.summary:find("[INACTIVE]", 1, true))
+		expect.truthy(disabled_status.summary:find("skipped", 1, true))
+
+		-- Child subagent hosts skip mare.ui.notify so parent TUI does not receive duplicate stderr warnings.
+		setup("claude-code")
+		local orig_mode = mare.mode
+		mare.mode = "child"
+		S.config.sources[1].hooks = {
+			PreToolUse = {
+				{ matcher = "probe", hooks = { { type = "http", url = "https://policy.example.invalid/check" } } },
+			},
+		}
+		local ok_child, err_child = pcall(plugin.apply, ctx, S.config)
+		mare.mode = orig_mode
+		assert(ok_child, err_child)
+		expect.eq(#S.diagnostics, 1)
+		expect.eq(#S.notifications, 0)
+		expect.eq(vote().decision, "deny")
 	end)
 
 	it("selects commandWindows/command_windows via mare.os and supports >600s timeouts", function()

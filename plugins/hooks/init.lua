@@ -46,34 +46,25 @@ return {
 	apply = function(ctx, cfg)
 		local load_config = require("hooks.config")
 		local commands, warnings, ui_warnings = load_config(cfg)
-		local seen_warnings, pending_ui_warnings = {}, {}
-		local function ui_connected()
-			return mare.ui and type(mare.ui.connected) == "function" and mare.ui.connected()
-		end
+		local seen_warnings = {}
 		local function report_warnings(list, notify_set)
 			for _, warning in ipairs(list) do
 				if not seen_warnings[warning] then
 					seen_warnings[warning] = true
 					mare.log("warn", warning)
-					if notify_set and notify_set[warning] then
-						if mare.mode == "rpc" and not ui_connected() then
-							pending_ui_warnings[#pending_ui_warnings + 1] = warning
-						elseif mare.ui and type(mare.ui.notify) == "function" then
-							pcall(mare.ui.notify, warning, "warning")
-						end
+					if
+						notify_set
+						and notify_set[warning]
+						and mare.mode ~= "child"
+						and mare.ui
+						and type(mare.ui.notify) == "function"
+					then
+						pcall(mare.ui.notify, warning, "warning")
 					end
 				end
 			end
 		end
 		report_warnings(warnings, ui_warnings)
-		ctx:on("app/ready", function()
-			if ui_connected() and #pending_ui_warnings > 0 then
-				for _, warning in ipairs(pending_ui_warnings) do
-					pcall(mare.ui.notify, warning, "warning")
-				end
-				pending_ui_warnings = {}
-			end
-		end)
 		-- One registrar for every hook event: a decision point registers a policy voter;
 		-- a core waterfall gets the around form (fn(value, ..., next)) and passes its result on; any
 		-- other event is a plain listener. Listener-level timeout_ms is gone natively (the emitter

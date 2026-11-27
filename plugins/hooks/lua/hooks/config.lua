@@ -523,7 +523,7 @@ return function(cfg, opts)
 					local label = source.dialect .. " " .. event .. " " .. si .. ":" .. gi .. ":" .. hi
 					if hook_type ~= "command" then
 						optional_boolean(hook.enabled, "enabled")
-						local decision_event = DECISION_EVENTS[event] == true
+						local decision_event = DECISION_EVENTS[event] == true and hook.enabled ~= false
 						local warning
 						if decision_event then
 							warning = string.format(
@@ -556,8 +556,6 @@ return function(cfg, opts)
 							event = event,
 							unsupported_type = hook_type,
 							decision_event = decision_event,
-							enabled = hook.enabled ~= false,
-							group_id = si .. ":" .. event .. ":" .. gi,
 							matcher = matcher,
 							literal = literal,
 							regex = regex,
