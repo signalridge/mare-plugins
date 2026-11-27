@@ -15,27 +15,47 @@ local function find_command(commands, target)
 	return nil
 end
 
+local function describe_command(cmd, state)
+	local matcher = cmd.matcher or "*"
+	if cmd.unsupported_type then
+		local behaviour = cmd.decision_event and "fail-closed" or "skipped"
+		return {
+			tag = "INACTIVE",
+			matcher = matcher,
+			status_meta = string.format("unsupported %q hook, %s", cmd.unsupported_type, behaviour),
+			detail = string.format("unsupported %q hook (%s) | %s", cmd.unsupported_type, behaviour, cmd.source_name),
+			target = cmd.source_name,
+		}
+	end
+	local enabled = state.is_enabled(cmd) and "ON" or "OFF"
+	local trust = cmd.require_trust and (state.is_trusted(cmd) and "trusted" or "untrusted") or "auto"
+	local mode = cmd.runs_async and ", async" or ""
+	local cur_hash = type(state.current_hash) == "function" and state.current_hash(cmd) or cmd.hash
+	local hash = (cur_hash or "unverified"):sub(1, 12)
+	return {
+		tag = enabled,
+		matcher = matcher,
+		status_meta = string.format("%s%s, sha256:%s", trust, mode, hash),
+		detail = string.format("%s | %s | sha256:%s", cmd.command, trust, hash),
+		target = cmd.command,
+	}
+end
+
 local function format_status(commands, state)
 	if #commands == 0 then
 		return "No hooks configured."
 	end
 	local lines = {}
 	for i, cmd in ipairs(commands) do
-		local enabled = state.is_enabled(cmd) and "ON" or "OFF"
-		local trust = cmd.require_trust and (state.is_trusted(cmd) and "trusted" or "untrusted") or "auto"
-		local mode = cmd.runs_async and ", async" or ""
-		local cur_hash = type(state.current_hash) == "function" and state.current_hash(cmd) or cmd.hash
-		local hash = cur_hash and cur_hash:sub(1, 12) or "unverified"
+		local info = describe_command(cmd, state)
 		lines[#lines + 1] = string.format(
-			"%d. [%s] %s (%s, %s%s, sha256:%s) -> %s",
+			"%d. [%s] %s (%s, %s) -> %s",
 			i,
-			enabled,
+			info.tag,
 			cmd.label,
-			cmd.matcher or "*",
-			trust,
-			mode,
-			hash,
-			cmd.command
+			info.matcher,
+			info.status_meta,
+			info.target
 		)
 	end
 	return table.concat(lines, "\n")
@@ -45,6 +65,13 @@ local function notify(text, level)
 	if mare.ui and type(mare.ui.notify) == "function" then
 		mare.ui.notify(text, level or "info")
 	end
+end
+
+local function inactive_rejection(cmd)
+	return {
+		status = "rejected",
+		reason = string.format("hook %s is inactive (unsupported type %q)", cmd.label, cmd.unsupported_type),
+	}
 end
 
 return function(ctx, commands, state)
@@ -66,6 +93,9 @@ return function(ctx, commands, state)
 				local cmd = find_command(commands, target)
 				if not cmd then
 					return { status = "rejected", reason = "unknown hook handler: " .. tostring(target) }
+				end
+				if cmd.unsupported_type then
+					return inactive_rejection(cmd)
 				end
 				if action == "toggle" then
 					local enabled = state.toggle(cmd)
@@ -103,18 +133,11 @@ return function(ctx, commands, state)
 			end
 			local items = {}
 			for i, cmd in ipairs(commands) do
-				local enabled = state.is_enabled(cmd) and "ON" or "OFF"
-				local trust = cmd.require_trust and (state.is_trusted(cmd) and "trusted" or "untrusted") or "auto"
-				local cur_hash = type(state.current_hash) == "function" and state.current_hash(cmd) or cmd.hash
+				local info = describe_command(cmd, state)
 				items[i] = {
 					id = cmd.id,
-					label = string.format("[%s] %s (%s)", enabled, cmd.label, cmd.matcher or "*"),
-					detail = string.format(
-						"%s | %s | sha256:%s",
-						cmd.command,
-						trust,
-						(cur_hash or "unverified"):sub(1, 12)
-					),
+					label = string.format("[%s] %s (%s)", info.tag, cmd.label, info.matcher),
+					detail = info.detail,
 				}
 			end
 			local index, tab_or_reason = mare.ui.select({
@@ -131,6 +154,11 @@ return function(ctx, commands, state)
 			local chosen = commands[index]
 			if not chosen then
 				return { status = "rejected", reason = "invalid hook selection" }
+			end
+			if chosen.unsupported_type then
+				local rej = inactive_rejection(chosen)
+				notify(rej.reason, "warning")
+				return rej
 			end
 			local enabled = state.toggle(chosen)
 			notify("Hook " .. chosen.label .. (enabled and " enabled" or " disabled"), "info")

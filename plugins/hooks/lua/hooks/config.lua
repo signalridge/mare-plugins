@@ -14,6 +14,11 @@ local ALLOWED_EVENTS = {}
 for _, ev in ipairs(EVENTS) do
 	ALLOWED_EVENTS[ev] = true
 end
+local DECISION_EVENTS = {
+	PreToolUse = true,
+	PermissionRequest = true,
+	UserPromptSubmit = true,
+}
 local function fields(value, allowed, what)
 	assert(type(value) == "table" and not mare.json.is_array(value), what .. " must be an object")
 	for k in pairs(value) do
@@ -321,7 +326,7 @@ return function(cfg, opts)
 	optional_boolean(cfg.requireTrust, "requireTrust")
 	local is_trusted = (type(opts) == "table" and opts.trusted ~= nil) and (opts.trusted == true)
 		or (mare.trusted == true)
-	local commands, warnings, id_counts = {}, {}, {}
+	local commands, warnings, ui_warnings, id_counts = {}, {}, {}, {}
 	local function unique_cmd_id(dialect, event, source_scope, declaration_hash)
 		local base = dialect .. ":" .. event .. ":" .. fingerprint.hash_identity({ source_scope, declaration_hash })
 		local count = (id_counts[base] or 0) + 1
@@ -425,6 +430,10 @@ return function(cfg, opts)
 			or source.path and ("file:" .. canonical_path(source.path))
 			or plugin_root and ("plugin:" .. canonical_path(plugin_root))
 			or ("inline:" .. canonical_path(mare.cwd or ""))
+		local source_name = source._discovered_path
+			or source.path
+			or plugin_root
+			or (source.dialect .. " inline source #" .. si)
 		local function bind_trust_fields(declaration_hash)
 			if require_trust and plugin_root then
 				local content_hash, fp_err = fingerprint.plugin_content_hash(plugin_root)
@@ -513,7 +522,47 @@ return function(cfg, opts)
 					assert(type(hook_type) == "string", "hook type must be a string")
 					local label = source.dialect .. " " .. event .. " " .. si .. ":" .. gi .. ":" .. hi
 					if hook_type ~= "command" then
-						warnings[#warnings + 1] = label .. ': skipping unsupported "' .. hook_type .. '" hook'
+						optional_boolean(hook.enabled, "enabled")
+						local decision_event = DECISION_EVENTS[event] == true
+						local warning
+						if decision_event then
+							warning = string.format(
+								"%s: %s hook of type %q from %s is not supported; matching calls will fail closed",
+								label,
+								event,
+								hook_type,
+								source_name
+							)
+						else
+							warning =
+								string.format("%s: skipping unsupported %q hook from %s", label, hook_type, source_name)
+						end
+						warnings[#warnings + 1] = warning
+						ui_warnings[warning] = true
+						local declaration_hash = fingerprint.hash_identity({
+							"unsupported",
+							hook_type,
+							event,
+							matcher or "",
+							source.dialect,
+							plugin_root or "",
+							source.path or "",
+							source._discovered_path or "",
+							hi,
+						})
+						commands[#commands + 1] = {
+							id = unique_cmd_id(source.dialect, event, source_scope, declaration_hash),
+							source_name = source_name,
+							event = event,
+							unsupported_type = hook_type,
+							decision_event = decision_event,
+							enabled = hook.enabled ~= false,
+							group_id = si .. ":" .. event .. ":" .. gi,
+							matcher = matcher,
+							literal = literal,
+							regex = regex,
+							label = label,
+						}
 					else
 						fields(hook, {
 							type = true,
@@ -645,5 +694,5 @@ return function(cfg, opts)
 			end
 		end
 	end
-	return commands, warnings
+	return commands, warnings, ui_warnings
 end

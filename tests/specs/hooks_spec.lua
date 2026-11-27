@@ -440,19 +440,156 @@ describe("hooks", function()
 		expect.eq(vote().decision, "deny")
 	end)
 
-	it("warns on non-command hooks without crashing startup", function()
+	it("fails closed on unsupported hook types on decision events and notifies UI", function()
 		for _, hook_spec in ipairs({
 			{ type = "prompt", prompt = "ok?" },
 			{ type = "agent", prompt = "check" },
-			{ type = "http", url = "https://example.invalid" },
+			{ type = "http", url = "https://example.invalid", async = true },
 		}) do
 			setup()
-			S.config.sources[1].hooks = { PreToolUse = { { hooks = { hook_spec } } } }
+			S.config.sources[1].path = "/tmp/policy.claude.json"
+			S.config.sources[1].hooks = nil
+			local orig_fs = mare.fs
+			mare.fs = {
+				read = function(p)
+					if p == "/tmp/policy.claude.json" then
+						return mare.json.encode_strict({
+							hooks = { PreToolUse = { { matcher = "probe", hooks = { hook_spec } } } },
+						})
+					end
+					return orig_fs.read(p)
+				end,
+				realpath = function(p)
+					return p
+				end,
+			}
 			plugin.apply(ctx, S.config)
+			mare.fs = orig_fs
 			expect.eq(#S.diagnostics, 1)
-			expect.eq(vote().decision, "allow")
+			expect.eq(#S.notifications, 1)
+			expect.eq(S.notifications[1].level, "warning")
+			expect.truthy(S.notifications[1].text:find(hook_spec.type, 1, true))
+			expect.truthy(S.notifications[1].text:find("/tmp/policy.claude.json", 1, true))
+
+			local v = vote()
+			expect.eq(v.decision, "deny")
+			expect.truthy(v.reason:find("PreToolUse", 1, true))
+			expect.truthy(v.reason:find(hook_spec.type, 1, true))
+			expect.truthy(v.reason:find("/tmp/policy.claude.json", 1, true))
 			expect.eq(S.runs, 0)
+
+			local non_matching = S.events["tool/before"]({ id = "c2", name = "other", arguments = {} })
+			expect.eq(non_matching.decision, "allow")
+
+			local status_res = S.commands_reg.hooks.run("status")
+			expect.eq(status_res.status, "completed")
+			expect.truthy(status_res.summary:find("[INACTIVE]", 1, true))
+			S.select_fn = function(opts)
+				expect.truthy(opts.items[1].label:find("[INACTIVE]", 1, true))
+				return 1
+			end
+			expect.eq(S.commands_reg.hooks.run("").status, "rejected")
+			S.select_fn = nil
+			expect.eq(S.commands_reg.hooks.run("enable 1").status, "rejected")
+			expect.eq(S.commands_reg.hooks.run("toggle 1").status, "rejected")
+			expect.eq(S.commands_reg.hooks.run("trust 1").status, "rejected")
 		end
+
+		-- PermissionRequest and UserPromptSubmit also fail closed on unsupported types.
+		setup("claude-code")
+		S.config.sources[1].hooks = {
+			PermissionRequest = {
+				{ matcher = "probe", hooks = { { type = "http", url = "https://policy.example.invalid/check" } } },
+			},
+			UserPromptSubmit = {
+				{ hooks = { { type = "prompt", prompt = "allow prompt?" } } },
+			},
+		}
+		plugin.apply(ctx, S.config)
+		expect.eq(#S.notifications, 2)
+		local pr_vote = S.events["tool/approval"](call, {}, {}, mare.task.token())
+		expect.eq(pr_vote.decision, "deny")
+		expect.truthy(pr_vote.reason:find("PermissionRequest", 1, true))
+		expect.truthy(pr_vote.reason:find("http", 1, true))
+		expect.truthy(pr_vote.reason:find("inline source #1", 1, true))
+
+		local input_vote = S.events["agent/input-ready"]({
+			input_id = "in-1",
+			attempt_id = "att-1",
+			revision = 0,
+			turn_id = "t-unsupported",
+			content = { { type = "text", text = "hello" } },
+			session = { session_id = "session", session_epoch = "epoch-1" },
+			cancel = mare.task.token(),
+		})
+		expect.eq(input_vote.decision, "deny")
+		expect.truthy(input_vote.reason:find("UserPromptSubmit", 1, true))
+		expect.truthy(input_vote.reason:find("prompt", 1, true))
+		expect.truthy(input_vote.reason:find("inline source #1", 1, true))
+	end)
+
+	it("fails closed when mixing supported command and unsupported hooks in the same matcher group", function()
+		for _, reversed in ipairs({ false, true }) do
+			setup("claude-code")
+			local cmd_hook = { type = "command", command = "check", timeout = 1 }
+			local http_hook = { type = "http", url = "https://policy.example.invalid/check" }
+			S.config.sources[1].hooks = {
+				PreToolUse = {
+					{
+						matcher = "probe",
+						hooks = reversed and { http_hook, cmd_hook } or { cmd_hook, http_hook },
+					},
+				},
+			}
+			plugin.apply(ctx, S.config)
+			H.set_json({ hookSpecificOutput = { hookEventName = "PreToolUse", permissionDecision = "allow" } })
+			local v = vote()
+			expect.eq(v.decision, "deny")
+			expect.truthy(v.reason:find("http", 1, true))
+			expect.truthy(v.reason:find("inline source #1", 1, true))
+			expect.eq(S.runs, 1)
+
+			local status_res = S.commands_reg.hooks.run("status")
+			expect.truthy(status_res.summary:find("[ON]", 1, true))
+			expect.truthy(status_res.summary:find("[INACTIVE]", 1, true))
+		end
+	end)
+
+	it("skips unsupported hook types on non-gating events, notifies UI once, and lists inactive in /hooks", function()
+		setup("claude-code")
+		S.config.sources[1].hooks = {
+			SessionStart = { { hooks = { { type = "prompt", prompt = "warmup?" } } } },
+			PostToolUse = {
+				{
+					matcher = "probe",
+					hooks = {
+						{ type = "command", command = "check", timeout = 1 },
+						{ type = "agent", prompt = "audit?" },
+					},
+				},
+			},
+		}
+		plugin.apply(ctx, S.config)
+		expect.eq(#S.diagnostics, 2)
+		expect.eq(#S.notifications, 2)
+		local joined_notifications = S.notifications[1].text .. "\n" .. S.notifications[2].text
+		expect.truthy(joined_notifications:find("prompt", 1, true))
+		expect.truthy(joined_notifications:find("agent", 1, true))
+
+		-- Reloading on trust/changed without new warnings does not duplicate UI notifications.
+		S.events["trust/changed"]({ trusted = mare.trusted == true })
+		expect.eq(#S.notifications, 2)
+
+		-- Non-gating unsupported hooks are skipped at runtime without failing PostToolUse.
+		expect.eq(S.events["session/started"], nil)
+		H.set_json({ hookSpecificOutput = { hookEventName = "PostToolUse", additionalContext = "POST OK" } })
+		local settled = S.events["tool/program-result"]({ content = "actual" }, call, { execution_id = "ex-1" })
+		expect.falsy(settled.is_error)
+		expect.eq(S.runs, 1)
+
+		local status_res = S.commands_reg.hooks.run("status")
+		expect.truthy(status_res.summary:find("[INACTIVE]", 1, true))
+		expect.truthy(status_res.summary:find("[ON]", 1, true))
 	end)
 
 	it("selects commandWindows/command_windows via mare.os and supports >600s timeouts", function()
