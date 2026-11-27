@@ -164,9 +164,11 @@ describe("session-search", function()
 		end
 
 		expect.eq(tools.session_search.concurrency_safe, false)
-		expect.eq(tools.session_search.timeout_ms, 5000)
+		expect.eq(tools.session_search.timeout_ms, nil)
+		expect.eq(tools.session_search.timeout_policy, "managed")
 		expect.eq(tools.session_event_search.concurrency_safe, false)
-		expect.eq(tools.session_event_search.timeout_ms, 5000)
+		expect.eq(tools.session_event_search.timeout_ms, nil)
+		expect.eq(tools.session_event_search.timeout_policy, "managed")
 		expect.eq(tools.session_trace.concurrency_safe, true)
 		expect.eq(tools.session_trace.timeout_ms, nil)
 		expect.eq(tools.session_event_read.concurrency_safe, true)
@@ -889,4 +891,54 @@ describe("session-search", function()
 			expect.eq(swapped_res.error_code, "QUERY_STALE_CURSOR")
 		end
 	)
+
+	it("reads search_timeout_ms from live config on each call after registration", function()
+		local live_tools = {}
+		local live_cfg = { max_search_results = 3, search_timeout_ms = 40, backend = "" }
+		local live_ctx = {
+			agent = ctx.agent,
+			tools = {
+				register = function(_, name, def)
+					live_tools[name] = def
+				end,
+			},
+			context = ctx.context,
+			query = {
+				supports = ctx.query.supports,
+				call = function(_, op, req, opts)
+					return query_handler(op, req, opts)
+				end,
+			},
+			on = function() end,
+		}
+		plugin.apply(live_ctx, live_cfg)
+
+		query_handler = function(_, _, opts)
+			local tok = opts and opts.cancel and opts.cancel()
+			mare.task.sleep(150, tok)
+			if tok and tok:is_cancelled() then
+				error("QUERY_CANCELLED: cancelled", 0)
+			end
+			return { provider = "p1", corpus_revision = "g1", data = { { session_id = "s-slow" } } }
+		end
+
+		local timed_out = live_tools.session_search.execute({ query = "slow" }, { cancel = mare.task.token() })
+		expect.eq(timed_out.is_error, true)
+		expect.eq(timed_out.error_code, "tool_timeout")
+
+		-- Raise search_timeout_ms after registration (apply = "next_op"): next search succeeds.
+		live_cfg.search_timeout_ms = 500
+		local ok_search = live_tools.session_search.execute({ query = "slow" }, { cancel = mare.task.token() })
+		expect.falsy(ok_search.is_error)
+		expect.eq(#ok_search.details.data, 1)
+
+		-- Lower search_timeout_ms after registration: session_event_search picks up the tighter limit too.
+		live_cfg.search_timeout_ms = 40
+		local event_timed_out = live_tools.session_event_search.execute(
+			{ query = "slow" },
+			{ cancel = mare.task.token() }
+		)
+		expect.eq(event_timed_out.is_error, true)
+		expect.eq(event_timed_out.error_code, "tool_timeout")
+	end)
 end)
