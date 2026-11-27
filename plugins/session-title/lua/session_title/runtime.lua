@@ -47,7 +47,7 @@ return function(ctx, cfg)
 	local provider, pending, disposed, revision = nil, nil, false, 0
 	local scheduled, last_model = nil, nil
 	local recorded_meta, in_flight_commit = nil, nil
-	local active, fallback_cancels = {}, {}
+	local active, fallback_cancels, warned_unresolved = {}, {}, {}
 	local function find_recorded_meta(name, name_revision)
 		if recorded_meta and recorded_meta.name == name and tonumber(recorded_meta.name_revision) == name_revision then
 			return recorded_meta.metadata
@@ -349,11 +349,21 @@ return function(ctx, cfg)
 				return
 			end
 			if not ok or not finished or type(result) ~= "table" or type(result.title) ~= "string" then
-				mare.log(
-					"warn",
-					"session title generation failed: "
-						.. tostring(ok and (finished and result or "timeout") or finished)
-				)
+				local err_msg = tostring(ok and (finished and result or "timeout") or finished)
+				local unresolved = err_msg:match("configured title model (.-) could not be resolved")
+				if unresolved then
+					if not warned_unresolved[unresolved] then
+						warned_unresolved[unresolved] = true
+						mare.log(
+							"warn",
+							"session title generation failed: configured title model "
+								.. unresolved
+								.. " could not be resolved"
+						)
+					end
+				else
+					mare.log("warn", "session title generation failed: " .. err_msg)
+				end
 				return
 			end
 			local saved, err = commit(
