@@ -1,0 +1,246 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Load pinned CI tool versions
+        id: tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          stylua_ver="$(jq -er '.stylua | strings' .github/ci-tools.json)"
+          ast_grep_ver="$(jq -er '.ast_grep.version | strings' .github/ci-tools.json)"
+          ast_grep_sha="$(jq -er '.ast_grep.sha256 | strings' .github/ci-tools.json)"
+          {
+            echo "stylua=${stylua_ver}"
+            echo "ast_grep_version=${ast_grep_ver}"
+            echo "ast_grep_sha256=${ast_grep_sha}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install Lua and ast-grep
+        shell: bash
+        env:
+          AST_GREP_VER: ${{ steps.tools.outputs.ast_grep_version }}
+          AST_GREP_SHA: ${{ steps.tools.outputs.ast_grep_sha256 }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y lua5.4
+          if ! command -v lua >/dev/null 2>&1; then
+            sudo ln -s /usr/bin/lua5.4 /usr/local/bin/lua
+          fi
+          lua -v
+          tools_dir="${RUNNER_TEMP}/lua-lint-tools"
+          mkdir -p "${tools_dir}/bin"
+          curl -fsSL -o "${tools_dir}/ast-grep.zip" \
+            "https://github.com/ast-grep/ast-grep/releases/download/${AST_GREP_VER}/app-x86_64-unknown-linux-gnu.zip"
+          printf '%s  %s\n' "${AST_GREP_SHA}" "${tools_dir}/ast-grep.zip" | sha256sum -c -
+          unzip -q "${tools_dir}/ast-grep.zip" -d "${tools_dir}/bin"
+          rm -f "${tools_dir}/ast-grep.zip"
+          echo "${tools_dir}/bin" >> "$GITHUB_PATH"
+
+      - uses: JohnnyMorganz/stylua-action@76fd70c03e6340ceaf673366712db9b20560b402 # v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ steps.tools.outputs.stylua }}
+          args: --check plugins types tests
+
+      - name: Validate manifests, contracts, CI policy, and Lua public API
+        run: |
+          python3 tests/manifests.py
+          python3 tests/test_manifests.py
+          python3 tests/test_ci_workflow.py
+          lua tests/service-contracts.lua
+          python3 scripts/lua_api_rules.py --self-test
+          python3 tests/test_lua_api_rules.py
+          python3 scripts/lua_api_rules.py
+
+      - name: Check relative Markdown links
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          root = pathlib.Path(".").resolve()
+          files = (
+              list(root.glob("README*.md"))
+              + list(root.glob("docs/*.md"))
+              + list(root.glob("plugins/*/README.md"))
+          )
+          link_re = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+          broken = []
+
+          for md in sorted(files):
+              text = md.read_text(encoding="utf-8")
+              for match in link_re.finditer(text):
+                  target = match.group(1).strip().split()[0]
+                  if target.startswith(("http://", "https://", "mailto:", "#")):
+                      continue
+                  path_part = target.split("#", 1)[0]
+                  if not path_part:
+                      continue
+                  resolved = (md.parent / path_part).resolve()
+                  if not resolved.exists():
+                      broken.append((str(md.relative_to(root)), target))
+
+          print(f"Checked {len(files)} markdown files; broken={len(broken)}")
+          for src, target in broken:
+              print(f"ERROR: broken relative link in {src}: {target}", file=sys.stderr)
+          if broken:
+              sys.exit(1)
+          PY
+
+  check-mare-release:
+    # Checks whether the pinned Mare release tag in `.mare-version` is published.
+    # Before `v1.0.0` exists, `.mare-version == v1.0.0` returning HTTP 404 sets
+    # `available=false` so the `specs` job reports an explicit GitHub Actions
+    # `skipped` status instead of silently passing green. Once `v1.0.0` is
+    # published (or if `.mare-version` points to any other missing tag), a 404
+    # fails CI immediately.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      available: ${{ steps.mare_release.outputs.available }}
+      mare_version: ${{ steps.mare_release.outputs.mare_version }}
+      ast_grep_version: ${{ steps.mare_release.outputs.ast_grep_version }}
+      ast_grep_sha256: ${{ steps.mare_release.outputs.ast_grep_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Load pinned Mare and ast-grep versions
+        id: mare_release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mare_ver="$(tr -d '[:space:]' < .mare-version)"
+          if [[ ! "$mare_ver" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
+            printf '::error::Invalid .mare-version value: %s\n' "$mare_ver"
+            exit 1
+          fi
+          ast_grep_ver="$(jq -er '.ast_grep.version | strings' .github/ci-tools.json)"
+          ast_grep_sha="$(jq -er '.ast_grep.sha256 | strings' .github/ci-tools.json)"
+          {
+            echo "mare_version=${mare_ver}"
+            echo "ast_grep_version=${ast_grep_ver}"
+            echo "ast_grep_sha256=${ast_grep_sha}"
+          } >> "$GITHUB_OUTPUT"
+
+          http_code="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            "https://api.github.com/repos/signalridge/mare/releases/tags/${mare_ver}")"
+          if [[ "$http_code" == "200" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$http_code" == "404" ]]; then
+            if [[ "$mare_ver" == "v1.0.0" ]]; then
+              printf '::warning::Mare v1.0.0 is not published yet (HTTP 404); '
+              printf 'marking specs job as skipped until v1.0.0 is released.\n'
+              echo "available=false" >> "$GITHUB_OUTPUT"
+            else
+              v1_code="$(curl -sS -o /dev/null -w '%{http_code}' \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                "https://api.github.com/repos/signalridge/mare/releases/tags/v1.0.0")"
+              if [[ "$v1_code" == "200" ]]; then
+                printf '::error::Mare v1.0.0 is already published; '
+                printf 'missing release %s (HTTP 404) cannot skip specs.\n' "$mare_ver"
+              else
+                printf '::error::Mare release %s not found (HTTP 404); ' "$mare_ver"
+                printf 'pre-release skip is only allowed while bootstrapping v1.0.0.\n'
+              fi
+              exit 1
+            fi
+          else
+            printf '::error::Unexpected HTTP %s while checking signalridge/mare release %s\n' \
+              "$http_code" "$mare_ver"
+            exit 1
+          fi
+
+  specs:
+    # Runs all Lua unit specs and types-backed Lua public API checks against the
+    # Mare release tag declared in `.mare-version`. Release integrity is verified
+    # cryptographically via cosign (`checksums.txt.sigstore.json`) and `checksums.txt`
+    # instead of hardcoding archive hashes. Note: `just test` (E2E) requires a
+    # `--features faux` build (stripped from release binaries by design) plus
+    # `mmdc >= 12`, so E2E runs in integration/acceptance.
+    needs: [check-mare-release]
+    if: needs.check-mare-release.outputs.available == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Install ast-grep and verified Mare release
+        shell: bash
+        env:
+          MARE_VER: ${{ needs.check-mare-release.outputs.mare_version }}
+          AST_GREP_VER: ${{ needs.check-mare-release.outputs.ast_grep_version }}
+          AST_GREP_SHA: ${{ needs.check-mare-release.outputs.ast_grep_sha256 }}
+        run: |
+          set -euo pipefail
+          tools_dir="${RUNNER_TEMP}/mare-ci-tools"
+          mkdir -p "${tools_dir}/bin" "${tools_dir}/mare"
+          curl -fsSL -o "${tools_dir}/ast-grep.zip" \
+            "https://github.com/ast-grep/ast-grep/releases/download/${AST_GREP_VER}/app-x86_64-unknown-linux-gnu.zip"
+          printf '%s  %s\n' "${AST_GREP_SHA}" "${tools_dir}/ast-grep.zip" | sha256sum -c -
+          unzip -q "${tools_dir}/ast-grep.zip" -d "${tools_dir}/bin"
+          rm -f "${tools_dir}/ast-grep.zip"
+          echo "${tools_dir}/bin" >> "$GITHUB_PATH"
+
+          base_url="https://github.com/signalridge/mare/releases/download/${MARE_VER}"
+          archive="mare-${MARE_VER}-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSL -o "${tools_dir}/checksums.txt" "${base_url}/checksums.txt"
+          curl -fsSL -o "${tools_dir}/checksums.txt.sigstore.json" "${base_url}/checksums.txt.sigstore.json"
+          cosign verify-blob \
+            --bundle "${tools_dir}/checksums.txt.sigstore.json" \
+            --certificate-identity "https://github.com/signalridge/mare/.github/workflows/release.yaml@refs/tags/${MARE_VER}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${tools_dir}/checksums.txt"
+
+          curl -fsSL -o "${tools_dir}/${archive}" "${base_url}/${archive}"
+          (
+            cd "${tools_dir}"
+            match_count="$(grep -c -F "  ${archive}" checksums.txt || true)"
+            if [[ "$match_count" -ne 1 ]]; then
+              printf '::error::Expected exactly 1 checksum entry for %s in checksums.txt, found %s\n' \
+                "$archive" "$match_count"
+              exit 1
+            fi
+            grep -F "  ${archive}" checksums.txt | sha256sum -c -
+          )
+          tar -xzf "${tools_dir}/${archive}" -C "${tools_dir}/mare"
+          rm -f "${tools_dir}/${archive}" "${tools_dir}/checksums.txt" "${tools_dir}/checksums.txt.sigstore.json"
+          mare_dir="${tools_dir}/mare/mare-${MARE_VER}-x86_64-unknown-linux-gnu"
+          echo "MARE_DIR=${mare_dir}" >> "$GITHUB_ENV"
+          echo "MARE_BIN=${mare_dir}/mare" >> "$GITHUB_ENV"
+
+      - name: Run Lua unit specs and types-backed API rules
+        shell: bash
+        run: |
+          set -euo pipefail
+          "${MARE_BIN}" --version
+          ./tests/run-specs.sh
+          python3 scripts/lua_api_rules.py --types-dir "${MARE_DIR}/types"

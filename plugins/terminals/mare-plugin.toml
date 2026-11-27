@@ -1,0 +1,27 @@
+name = "terminals"
+version = "1.0.0"
+description = "Persistent interactive PTYs for REPLs and multi-step input."
+requires = ">=1.0.0"
+category = "tools"
+conflicts = []
+plugins = []
+keywords = ["terminal", "pty", "shell", "interactive"]
+license = "MIT"
+
+[deps]
+required = []
+optional = []
+[recommended]
+cmd = ["bash"]
+
+[provides]
+tools = [
+    "terminal_open",
+    "terminal_send",
+    "terminal_read",
+    "terminal_list",
+    "terminal_signal",
+    "terminal_close",
+]
+hooks = ["app/shutdown", "session/changed", "workspace/changed"]
+services = ["terminals"]

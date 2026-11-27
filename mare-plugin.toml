@@ -1,0 +1,4 @@
+name = "signalridge/mare-plugins"
+version = "1.0.0"
+description = "Optional plugins for mare."
+requires = ">=1.0.0"

@@ -1,0 +1,7 @@
+{
+  "stylua": "2.6.0",
+  "ast_grep": {
+    "version": "0.51.2",
+    "sha256": "40604c21c38d4c7581c56bdddeef277c56bf3c0113620aa96e78ae87e82366df"
+  }
+}

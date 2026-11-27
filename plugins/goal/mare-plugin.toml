@@ -1,0 +1,29 @@
+name = "goal"
+version = "1.0.0"
+description = "Persistent goals with idle continuation, budgets and completion audits."
+category = "agent"
+requires = ">=1.0.0"
+keywords = ["goals", "objectives", "progress", "budget"]
+license = "MIT"
+
+[provides]
+tools = ["get_goal", "create_goal", "update_goal"]
+commands = ["/goal"]
+hooks = [
+    "tool/before",
+    "request/build",
+    "turn/started",
+    "item/completed",
+    "llm/usage",
+    "step/started",
+    "agent/settled",
+    "turn/completed",
+    "session/changed",
+    "session/switch-completed",
+    "compact/completed",
+    "app/ready",
+    "plan-mode/changed",
+    "app/shutdown",
+    "goal/changed",
+]
+services = ["goals"]

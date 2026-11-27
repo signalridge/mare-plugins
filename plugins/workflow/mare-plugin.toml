@@ -1,0 +1,12 @@
+name = "workflow"
+version = "1.0.0"
+description = "Deterministic Lua multi-agent workflow orchestration with live progress panel and session records."
+category = "agent"
+requires = ">=1.0.0"
+keywords = ["workflow", "orchestration", "agents", "parallel"]
+license = "MIT"
+
+[provides]
+tools = ["workflow"]
+commands = ["/workflow"]
+hooks = ["session/loaded", "session/changed", "option/changed"]

@@ -1,0 +1,11 @@
+name = "tool-spill"
+version = "1.0.0"
+description = "Save complete large tool outputs and retrieve them on demand."
+category = "tools"
+requires = ">=1.0.0"
+keywords = ["output", "spill", "recovery"]
+license = "MIT"
+
+[provides]
+tools = ["read_spill"]
+hooks = ["tool/result"]

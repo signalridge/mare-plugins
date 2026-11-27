@@ -1,0 +1,135 @@
+name: CI Dependency Update
+
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ci-deps-update
+  cancel-in-progress: true
+
+jobs:
+  update-ci-deps:
+    name: Update pinned Mare and CI tool versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Check latest releases and update version files
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import re
+          import urllib.error
+          import urllib.request
+
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "User-Agent": "mare-plugins-ci-deps-update",
+          }
+          token = os.environ.get("GH_TOKEN")
+          if token:
+              headers["Authorization"] = f"Bearer {token}"
+
+          def fetch_json(url: str) -> dict | None:
+              req = urllib.request.Request(url, headers=headers)
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      return json.loads(resp.read().decode("utf-8"))
+              except urllib.error.HTTPError as err:
+                  if err.code == 404:
+                      return None
+                  raise
+
+          # 1. Update .mare-version when signalridge/mare publishes a stable release with signed checksums.
+          mare_release = fetch_json("https://api.github.com/repos/signalridge/mare/releases/latest")
+          if mare_release is None:
+              print("No published signalridge/mare release yet; keeping .mare-version unchanged.")
+          elif not mare_release.get("draft") and not mare_release.get("prerelease"):
+              tag = str(mare_release.get("tag_name", "")).strip()
+              assets = {a.get("name") for a in mare_release.get("assets", [])}
+              if (
+                  re.fullmatch(r"v\d+\.\d+\.\d+", tag)
+                  and "checksums.txt" in assets
+                  and "checksums.txt.sigstore.json" in assets
+              ):
+                  mare_file = pathlib.Path(".mare-version")
+                  if mare_file.read_text(encoding="utf-8").strip() != tag:
+                      mare_file.write_text(f"{tag}\n", encoding="utf-8")
+                      print(f"Updated .mare-version -> {tag}")
+
+          # 2. Update .github/ci-tools.json (StyLua + ast-grep).
+          tools_file = pathlib.Path(".github/ci-tools.json")
+          tools = json.loads(tools_file.read_text(encoding="utf-8"))
+          changed = False
+
+          stylua_rel = fetch_json("https://api.github.com/repos/JohnnyMorganz/StyLua/releases/latest")
+          if stylua_rel and not stylua_rel.get("draft") and not stylua_rel.get("prerelease"):
+              ver = str(stylua_rel.get("tag_name", "")).lstrip("v").strip()
+              if re.fullmatch(r"\d+\.\d+\.\d+", ver) and ver != tools.get("stylua"):
+                  tools["stylua"] = ver
+                  changed = True
+                  print(f"Updated stylua -> {ver}")
+
+          ag_rel = fetch_json("https://api.github.com/repos/ast-grep/ast-grep/releases/latest")
+          if ag_rel and not ag_rel.get("draft") and not ag_rel.get("prerelease"):
+              ver = str(ag_rel.get("tag_name", "")).lstrip("v").strip()
+              if re.fullmatch(r"\d+\.\d+\.\d+", ver) and ver != tools["ast_grep"]["version"]:
+                  asset_url = (
+                      f"https://github.com/ast-grep/ast-grep/releases/download/{ver}/"
+                      "app-x86_64-unknown-linux-gnu.zip"
+                  )
+                  req = urllib.request.Request(asset_url, headers={"User-Agent": headers["User-Agent"]})
+                  with urllib.request.urlopen(req, timeout=60) as resp:
+                      digest = hashlib.sha256(resp.read()).hexdigest()
+                  tools["ast_grep"] = {"version": ver, "sha256": digest}
+                  changed = True
+                  print(f"Updated ast_grep -> {ver} ({digest})")
+
+          if changed:
+              tools_file.write_text(json.dumps(tools, indent=2) + "\n", encoding="utf-8")
+          PY
+
+      - name: Validate updated CI policy
+        run: python3 tests/test_ci_workflow.py
+
+      - name: Check for version file changes
+        id: diff
+        run: |
+          if git diff --quiet -- .mare-version .github/ci-tools.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create pull request
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
+        with:
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          branch: chore/update-ci-versions
+          delete-branch: true
+          commit-message: "chore(ci): update pinned Mare and CI tool versions"
+          title: "chore(ci): update pinned Mare and CI tool versions"
+          body: |
+            Automated update of `.mare-version` and `.github/ci-tools.json` from upstream releases.
+
+            This PR was created by `.github/workflows/ci-deps-update.yaml`.
+          labels: |
+            dependencies
+            ci

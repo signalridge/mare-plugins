@@ -1,0 +1,17 @@
+name = "session-search"
+version = "1.0.0"
+description = "Search authorized session history, events, and lineage."
+category = "agent"
+requires = ">=1.0.0"
+keywords = ["sessions", "history", "search", "events"]
+license = "MIT"
+
+[provides]
+tools = [
+    "session_search",
+    "session_event_search",
+    "session_trace",
+    "session_event_trace",
+    "session_event_read",
+]
+hooks = ["query/changed"]

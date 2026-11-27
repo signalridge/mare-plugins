@@ -1,0 +1,33 @@
+name = "schedule"
+version = "1.0.0"
+description = "Persist scheduled prompts, manage delivery history, and run fixed or adaptive session loops."
+category = "agent"
+requires = ">=1.0.0"
+keywords = ["schedule", "recurring", "automation", "tasks"]
+license = "MIT"
+
+[provides]
+tools = [
+    "schedule_create",
+    "schedule_list",
+    "schedule_view",
+    "schedule_edit",
+    "schedule_set_next_delay",
+]
+commands = ["/schedule", "/loop"]
+hooks = [
+    "agent/input-ready",
+    "agent/step-ready",
+    "agent/settled",
+    "turn/completed",
+    "schedule/changed",
+    "queue/changed",
+    "plan-mode/changed",
+    "turn/started",
+    "session/changed",
+    "session/loaded",
+    "session/started",
+    "session/switch-completed",
+    "app/shutdown",
+]
+services = ["schedule"]

@@ -1,0 +1,11 @@
+name = "ask_user_question"
+version = "1.0.0"
+description = "Structured questions with recommendations and free text answers."
+category = "agent"
+requires = ">=1.0.0"
+keywords = ["questions", "user-input", "choices"]
+license = "MIT"
+
+[provides]
+tools = ["ask_user_question"]
+hooks = ["session/changed"]

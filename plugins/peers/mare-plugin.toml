@@ -1,0 +1,12 @@
+name = "peers"
+version = "1.0.0"
+description = "Discover local sessions, inspect peers, and send messages when the core peer client is available."
+category = "integration"
+requires = ">=1.0.0"
+keywords = ["peers", "sessions", "messaging"]
+license = "MIT"
+
+[provides]
+tools = ["peer_list", "peer_send", "peer_status"]
+commands = ["/peers"]
+hooks = ["session/changed"]

@@ -1,0 +1,11 @@
+100x40 Mare TUI widget (SGR escaped)
+\x1b[0m\x1b[38;2;47;120;160mTHEME-SNAPSHOT heading\x1b[0m\x1b[0m
+\x1b[0m\x1b[38;2;91;102;90msecondary\x1b[0m\x1b[0m
+\x1b[0m\x1b[38;2;106;114;104mhint\x1b[0m\x1b[0m
+\x1b[0m\x1b[38;2;104;119;1mtool success\x1b[0m\x1b[0m
+\x1b[0m\x1b[38;2;198;68;66mtool error\x1b[0m\x1b[0m
+\x1b[0m\x1b[48;2;183;203;204mselected row\x1b[0m\x1b[0m
+\x1b[0m\x1b[48;2;229;226;191m+ added line\x1b[0m\x1b[0m
+\x1b[0m\x1b[48;2;244;218;201m- removed line\x1b[0m\x1b[0m
+\x1b[0m\x1b[1m\x1b[38;2;253;246;227m\x1b[48;2;47;120;160mAUTO\x1b[0m\x1b[0m
+\x1b[0m\x1b[38;2;169;80;141m\x1b[48;2;243;236;218minline code\x1b[0m\x1b[0m

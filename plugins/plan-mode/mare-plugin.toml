@@ -1,0 +1,26 @@
+name = "plan-mode"
+version = "1.0.0"
+description = "Explicit planning guidance with a saved on/off state."
+category = "agent"
+requires = ">=1.0.0"
+keywords = ["planning", "review", "permissions"]
+license = "MIT"
+
+[provides]
+tools = ["exit_plan_mode"]
+commands = ["/plan"]
+hooks = [
+    "tool/before",
+    "model/changed",
+    "queue/changed",
+    "turn/started",
+    "request/prepare",
+    "turn/completed",
+    "agent/settled",
+    "session/changed",
+    "step/started",
+    "request/build",
+    "session/transition-completed",
+    "option/changed",
+]
+services = ["plan_mode"]

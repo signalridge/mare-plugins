@@ -1,0 +1,21 @@
+name = "presets"
+version = "1.0.0"
+description = "Apply model selection with live-session prompt and tool declaration preferences."
+category = "agent"
+requires = ">=1.0.0"
+keywords = ["presets", "models", "prompts", "tools"]
+license = "MIT"
+
+[provides]
+commands = ["/preset"]
+hooks = [
+    "session/changed",
+    "session/new",
+    "session/started",
+    "mcp/ready",
+    "mcp/changed",
+    "profile/tools-changed",
+    "turn/started",
+    "step/started",
+]
+services = ["presets"]

@@ -1,0 +1,13 @@
+name = "team"
+version = "1.0.0"
+description = "Shared multi-agent task board with dependencies, leases, and durable session history."
+category = "agent"
+requires = ">=1.0.0"
+keywords = ["team", "tasks", "board", "coordination"]
+license = "MIT"
+
+[provides]
+tools = ["team_create", "team_list", "team_claim", "team_update", "team_complete"]
+commands = ["/team"]
+hooks = ["session/changed", "session/loaded", "option/changed", "subagent/completed"]
+services = ["team"]

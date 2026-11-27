@@ -1,0 +1,39 @@
+name = "hooks"
+version = "1.0.0"
+description = "Run Claude Code and Codex command hooks synchronously or asynchronously."
+category = "integration"
+requires = ">=1.0.0"
+keywords = ["hooks", "automation", "integrations"]
+license = "MIT"
+
+[provides]
+commands = ["/hooks"]
+hooks = [
+    "PreToolUse",
+    "PostToolUse",
+    "UserPromptSubmit",
+    "SessionStart",
+    "SessionEnd",
+    "Stop",
+    "PreCompact",
+    "PostCompact",
+    "PermissionRequest",
+    "tool/before",
+    "tool/program-result",
+    "tool/after",
+    "tool/approval",
+    "agent/step-committed",
+    "agent/step-ready",
+    "agent/input-ready",
+    "agent/turn-stopping",
+    "turn/started",
+    "turn/completed",
+    "session/started",
+    "session/changed",
+    "session/loaded",
+    "session/new",
+    "session/closed",
+    "compact/before",
+    "compact/completed",
+    "trust/changed",
+]

@@ -1,0 +1,18 @@
+name = "session-title"
+version = "1.0.0"
+description = "Generate a concise title for an unnamed session using the selected model."
+category = "agent"
+requires = ">=1.0.0"
+keywords = ["sessions", "titles", "naming"]
+license = "MIT"
+
+[provides]
+commands = ["/title"]
+hooks = [
+    "item/completed",
+    "request/build",
+    "session/named",
+    "session/changed",
+    "session/loaded",
+]
+services = ["session_title"]

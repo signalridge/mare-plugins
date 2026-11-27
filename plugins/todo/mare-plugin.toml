@@ -1,0 +1,13 @@
+name = "todo"
+version = "1.0.0"
+description = "Task checklists and progress for multi-step work."
+category = "agent"
+requires = ">=1.0.0"
+keywords = ["tasks", "todo", "checklist", "progress"]
+license = "MIT"
+
+[provides]
+tools = ["todo_write"]
+commands = ["/todos"]
+hooks = ["session/changed", "turn/started", "request/ready"]
+services = ["todo"]

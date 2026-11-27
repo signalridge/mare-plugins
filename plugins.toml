@@ -1,0 +1,8 @@
+# Catalog migration table consumed by mare-plugin-manager (`extras/state.rs`).
+#
+# [renamed] maps retired plugin names to their replacement name in `plugins/`.
+# [deprecated] maps removed plugin names to a human-readable removal notice.
+
+[renamed]
+
+[deprecated]

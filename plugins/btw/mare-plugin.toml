@@ -1,0 +1,19 @@
+name = "btw"
+version = "1.0.0"
+description = "Complementary side-conversation controls, parked status indicator, and transcript viewer."
+category = "agent"
+requires = ">=1.0.0"
+keywords = ["conversation", "side-thread", "transcript"]
+license = "MIT"
+
+[provides]
+hooks = [
+    "conversation/opened",
+    "conversation/changed",
+    "conversation/stream",
+    "conversation/settled",
+    "conversation/closed",
+    "session/changed",
+    "session/loaded",
+]
+services = ["btw"]
