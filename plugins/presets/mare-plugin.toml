@@ -1,5 +1,5 @@
 name = "presets"
-version = "1.0.0"
+version = "1.0.1"
 description = "Apply model selection with live-session prompt and tool declaration preferences."
 category = "agent"
 requires = ">=1.0.0"

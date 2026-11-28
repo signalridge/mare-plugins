@@ -1,5 +1,5 @@
 name = "tool-spill"
-version = "1.0.0"
+version = "1.0.1"
 description = "Save complete large tool outputs and retrieve them on demand."
 category = "tools"
 requires = ">=1.0.0"

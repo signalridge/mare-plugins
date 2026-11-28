@@ -1,5 +1,5 @@
 name = "toolbelt"
-version = "1.0.0"
+version = "1.0.1"
 description = "Read-only rg, fd, ast-grep, and rga wrappers for fast codebase and document search."
 category = "tools"
 requires = ">=1.0.0"

@@ -1,5 +1,5 @@
 name = "team"
-version = "1.0.0"
+version = "1.0.1"
 description = "Shared multi-agent task board with dependencies, leases, and durable session history."
 category = "agent"
 requires = ">=1.0.0"

@@ -1,5 +1,5 @@
 name = "btw"
-version = "1.0.0"
+version = "1.0.1"
 description = "Complementary side-conversation controls, parked status indicator, and transcript viewer."
 category = "agent"
 requires = ">=1.0.0"

@@ -1,5 +1,5 @@
 name = "peers"
-version = "1.0.0"
+version = "1.0.1"
 description = "Discover local sessions, inspect peers, and send messages when the core peer client is available."
 category = "integration"
 requires = ">=1.0.0"

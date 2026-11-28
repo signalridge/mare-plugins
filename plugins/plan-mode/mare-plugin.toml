@@ -1,5 +1,5 @@
 name = "plan-mode"
-version = "1.0.0"
+version = "1.0.1"
 description = "Explicit planning guidance with a saved on/off state."
 category = "agent"
 requires = ">=1.0.0"
