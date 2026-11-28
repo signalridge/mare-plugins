@@ -1,5 +1,5 @@
 name = "hooks"
-version = "1.0.0"
+version = "1.0.1"
 description = "Run Claude Code and Codex command hooks synchronously or asynchronously."
 category = "integration"
 requires = ">=1.0.0"

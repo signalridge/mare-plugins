@@ -1,5 +1,5 @@
 name = "ask_user_question"
-version = "1.0.0"
+version = "1.0.1"
 description = "Structured questions with recommendations and free text answers."
 category = "agent"
 requires = ">=1.0.0"

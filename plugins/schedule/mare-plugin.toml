@@ -1,5 +1,5 @@
 name = "schedule"
-version = "1.0.0"
+version = "1.0.1"
 description = "Persist scheduled prompts, manage delivery history, and run fixed or adaptive session loops."
 category = "agent"
 requires = ">=1.0.0"

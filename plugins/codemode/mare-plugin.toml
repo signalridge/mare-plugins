@@ -1,5 +1,5 @@
 name = "codemode"
-version = "1.0.0"
+version = "1.0.1"
 description = "Run bounded Lua scripts that combine tools and return selected results."
 category = "tools"
 requires = ">=1.0.0"

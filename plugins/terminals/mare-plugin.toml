@@ -1,5 +1,5 @@
 name = "terminals"
-version = "1.0.0"
+version = "1.0.1"
 description = "Persistent interactive PTYs for REPLs and multi-step input."
 requires = ">=1.0.0"
 category = "tools"

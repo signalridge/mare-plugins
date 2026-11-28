@@ -1,5 +1,5 @@
 name = "session-title"
-version = "1.0.0"
+version = "1.0.1"
 description = "Generate a concise title for an unnamed session using the selected model."
 category = "agent"
 requires = ">=1.0.0"

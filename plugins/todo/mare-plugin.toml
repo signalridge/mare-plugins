@@ -1,5 +1,5 @@
 name = "todo"
-version = "1.0.0"
+version = "1.0.1"
 description = "Task checklists and progress for multi-step work."
 category = "agent"
 requires = ">=1.0.0"

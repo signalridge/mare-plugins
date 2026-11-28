@@ -1,5 +1,5 @@
 name = "time-context"
-version = "1.0.0"
+version = "1.0.1"
 description = "Durable host time and date disclosures at admitted model steps."
 category = "agent"
 requires = ">=1.0.0"
