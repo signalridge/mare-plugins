@@ -3,9 +3,16 @@ return function(ctx, cfg, text)
 		id = "llm",
 		automatic = cfg.automatic,
 		generate = function(request)
-			local model = cfg.model
-					and ctx.llm:resolve(cfg.provider and (cfg.provider .. "/" .. cfg.model) or cfg.model)
-				or request.model
+			local model
+			if cfg.model then
+				local spec = cfg.provider and (cfg.provider .. "/" .. cfg.model) or cfg.model
+				model = ctx.llm:resolve(spec)
+				if not model then
+					error(("configured title model %s could not be resolved"):format(spec), 0)
+				end
+			else
+				model = request.model
+			end
 			if not model then
 				error("title generation needs a captured request model or explicit model")
 			end

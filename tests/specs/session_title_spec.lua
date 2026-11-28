@@ -408,6 +408,50 @@ describe("session-title", function()
 				cancel = mare.task.token(),
 			})
 		end)
+
+		-- Unresolved explicit provider/model must never fall back to request.model, makes 0 stream calls,
+		-- reports the unresolved model once, and keeps the prompt-excerpt fallback title.
+		local unresolved_cfg = clone(cfg)
+		unresolved_cfg.provider, unresolved_cfg.model = "ollama-local", "qwen3:4b-typo"
+		ctx.llm.resolve = function()
+			return nil
+		end
+		local stream_before = calls
+		local ok_unres, err_unres = pcall(function()
+			require("session_title.llm")(ctx, unresolved_cfg, text_mod).generate({
+				id = "s1",
+				messages = { { id = "1", text = "hello" } },
+				model = { ref = "faux/main", efforts = { "low" } },
+				cancel = mare.task.token(),
+			})
+		end)
+		expect.falsy(ok_unres)
+		expect.truthy(tostring(err_unres):find("ollama-local/qwen3:4b-typo", 1, true))
+		expect.eq(calls, stream_before)
+
+		local warn_logs = {}
+		mare.log = function(level, msg)
+			if level == "warn" then
+				warn_logs[#warn_logs + 1] = msg
+			end
+		end
+		reset_records({ id = "unres-rt", generation = "1", revision = "0" })
+		entries, tasks, calls = {}, {}, 0
+		plugin.apply(ctx, unresolved_cfg)
+		input("first prompt excerpt")
+		drain()
+		expect.eq(calls, 0)
+		expect.eq(state.name, "first prompt excerpt")
+		expect.eq(service.get().metadata.source, "fallback")
+		expect.eq(#warn_logs, 1)
+		expect.truthy(warn_logs[1]:find("ollama-local/qwen3:4b-typo", 1, true))
+
+		-- A second prompt with the same unresolved model still makes 0 stream calls and does not repeat the warning.
+		input("second prompt follow up")
+		drain()
+		expect.eq(calls, 0)
+		expect.eq(#warn_logs, 1)
+		ctx.llm.resolve = old_resolve
 	end)
 
 	it("handles rename validation, /title command routing, and coalesced refresh", function()
