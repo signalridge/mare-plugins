@@ -45,10 +45,26 @@ return {
 	},
 	apply = function(ctx, cfg)
 		local load_config = require("hooks.config")
-		local commands, warnings = load_config(cfg)
-		for _, warning in ipairs(warnings) do
-			mare.log("warn", warning)
+		local commands, warnings, ui_warnings = load_config(cfg)
+		local seen_warnings = {}
+		local function report_warnings(list, notify_set)
+			for _, warning in ipairs(list) do
+				if not seen_warnings[warning] then
+					seen_warnings[warning] = true
+					mare.log("warn", warning)
+					if
+						notify_set
+						and notify_set[warning]
+						and mare.mode ~= "child"
+						and mare.ui
+						and type(mare.ui.notify) == "function"
+					then
+						pcall(mare.ui.notify, warning, "warning")
+					end
+				end
+			end
 		end
+		report_warnings(warnings, ui_warnings)
 		-- One registrar for every hook event: a decision point registers a policy voter;
 		-- a core waterfall gets the around form (fn(value, ..., next)) and passes its result on; any
 		-- other event is a plain listener. Listener-level timeout_ms is gone natively (the emitter
@@ -101,7 +117,9 @@ return {
 		local function sync_adapters()
 			local needed = {}
 			for _, command in ipairs(commands) do
-				needed[command.event] = true
+				if not command.unsupported_type or command.decision_event then
+					needed[command.event] = true
+				end
 			end
 			if needed.SessionEnd and not mounted.SessionEnd then
 				mounted.SessionEnd = true
@@ -141,14 +159,12 @@ return {
 			if type(ev) == "table" and ev.trusted ~= nil then
 				trusted = ev.trusted == true and mare.trusted == true
 			end
-			local ok, next_commands, next_warnings = pcall(load_config, cfg, { trusted = trusted })
+			local ok, next_commands, next_warnings, next_ui_warnings = pcall(load_config, cfg, { trusted = trusted })
 			if not ok then
 				mare.log("warn", "hooks reload after trust change failed: " .. tostring(next_commands))
 				return
 			end
-			for _, warning in ipairs(next_warnings) do
-				mare.log("warn", warning)
-			end
+			report_warnings(next_warnings, next_ui_warnings)
 			for i = #commands, 1, -1 do
 				commands[i] = nil
 			end

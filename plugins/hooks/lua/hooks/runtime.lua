@@ -667,7 +667,11 @@ return function(ctx, commands, turn, state)
 			or event == "PostCompact"
 		local sync_commands, async_commands = {}, {}
 		for _, command in ipairs(commands) do
-			if command.event == event and (not state or state.is_enabled(command)) then
+			if
+				command.event == event
+				and (not command.unsupported_type or command.decision_event)
+				and (not state or state.is_enabled(command))
+			then
 				local match_ok, matched = pcall(matches_subject, command, event, subject)
 				if not match_ok then
 					local reason = tostring(matched):match("[^\n]+")
@@ -765,6 +769,17 @@ return function(ctx, commands, turn, state)
 			}
 			refresh_working()
 			local ok, vote = pcall(function()
+				if command.unsupported_type then
+					error(
+						string.format(
+							"%s hook of type %q from %s is not supported",
+							event,
+							command.unsupported_type,
+							command.source_name or command.label
+						),
+						0
+					)
+				end
 				if state then
 					local trusted, trust_err = state.ensure_trusted(command)
 					if not trusted then

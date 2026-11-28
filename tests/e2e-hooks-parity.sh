@@ -117,7 +117,6 @@ mare.plugins.add { { "test/hooks", url = "file://$tmp_root/package", opts = { ho
       hooks = {
         PreToolUse = {
           { matcher = "hooks_probe", hooks = {
-            { type = "prompt", prompt = "ignored" },
             { type = "command", command = "'python3' '\${CLAUDE_PLUGIN_ROOT}/run.py' '\${CLAUDE_PLUGIN_ROOT}' '\${CLAUDE_PROJECT_DIR}'", commandWindows = "python3 '\${CLAUDE_PLUGIN_ROOT}/run.py' '\${CLAUDE_PLUGIN_ROOT}' '\${CLAUDE_PROJECT_DIR}'", timeout = 700 },
           } },
         },
@@ -128,6 +127,7 @@ mare.plugins.add { { "test/hooks", url = "file://$tmp_root/package", opts = { ho
         },
         SessionEnd = {
           { matcher = "other", hooks = {
+            { type = "prompt", prompt = "ignored" },
             { command = "python3 '$host_tmp_root/work/plugin-root/run.py'", timeout = 10, async = true },
           } },
         },
@@ -171,6 +171,92 @@ rm -f "$PARITY_LOG"
 "$mare_bin" -C "$tmp_root/work" --yolo --set policy_timeout_ms=500 -p --json --no-session 'run probe' >"$tmp_root/slow-allow.jsonl"
 rg -q 'PROBE EXECUTED actual' "$tmp_root/slow-allow.jsonl"
 jq -s -e '[.[] | select(.event == "PreToolUse")] | length >= 1' "$PARITY_LOG" >/dev/null
+
+# 1c. Unsupported hook types on PreToolUse fail closed (even mixed with an allow command hook),
+# show a startup UI notification, and list as [INACTIVE] in /hooks.
+saved_parity_init="$tmp_root/saved-parity-init.lua"
+cp "$MARE_HOME/config/init.lua" "$saved_parity_init"
+cat >"$tmp_root/work/unsupported-hooks.json" <<'JSON'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "hooks_probe",
+        "hooks": [
+          { "type": "command", "command": "python3 run.py", "timeout": 2 },
+          { "type": "http", "url": "https://policy.example.invalid/check" }
+        ]
+      }
+    ],
+    "SessionStart": [
+      { "hooks": [ { "type": "prompt", "prompt": "warmup" } ] }
+    ]
+  }
+}
+JSON
+cat >"$MARE_HOME/config/init.lua" <<LUA
+mare.setup { model = "faux/echo" }
+mare.plugins.add { { "test/hooks", url = "file://$tmp_root/package", opts = { hooks = {
+  sources = {
+    { dialect = "claude-code", path = "$host_tmp_root/work/unsupported-hooks.json" },
+  },
+} } } }
+LUA
+export PARITY_MODE="allow"
+rm -f "$PARITY_LOG"
+"$mare_bin" -C "$tmp_root/work/plugin-root" --yolo -p --json --no-session 'run probe' >"$tmp_root/unsupported-pre.jsonl" 2>"$tmp_root/unsupported-pre.err" || true
+refute_rg 'PROBE EXECUTED' "$tmp_root/unsupported-pre.jsonl"
+rg -q 'PreToolUse hook of type .*http' "$tmp_root/unsupported-pre.jsonl"
+rg -q 'unsupported-hooks\.json' "$tmp_root/unsupported-pre.jsonl"
+
+rc=0
+python3 - <<'PY' || rc=$?
+import os, sys
+if os.name == "nt":
+    print("SKIPPED[capability=posix.pty] POSIX PTY driver")
+    sys.exit(77)
+import importlib.util, pathlib, re
+sys.path.insert(0, os.environ["MARE_PLUGINS_PTY"])
+spec = importlib.util.spec_from_file_location("pty_terminal", pathlib.Path(os.environ["MARE_PLUGINS_PTY"]) / "pty_terminal.py")
+terminal = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(terminal)
+terminal.BOOT = 25
+
+def flat(raw):
+    # Notification cards wrap inside box borders; strip box borders so wrapped words stay contiguous.
+    text = re.sub(r"[│╭╮╰╯─]+", " ", terminal.plain(raw))
+    return " ".join(text.split())
+
+work = pathlib.Path(os.environ["PARITY_LOG"]).parent
+env = {k: v for k, v in os.environ.items() if k != "TERM"}
+env["MARE_NO_TERM_PROBE"] = "1"
+
+@terminal.cleanup.scoped
+def check_tui():
+    tty = terminal.Tty(os.environ["MARE_BIN"], ["--yolo", "--no-session", "-C", str(work)], False, env)
+    try:
+        tty.ready()
+        tty.pump(2, until=lambda raw: 'PreToolUse hook of type "http"' in flat(raw))
+        startup_screen = flat(tty.out)
+        assert 'PreToolUse hook of type "http"' in startup_screen, startup_screen[-2000:]
+        assert 'skipping unsupported "prompt" hook' in startup_screen, startup_screen[-2000:]
+        tty.submit(b"/hooks status", until=lambda raw: "[INACTIVE]" in flat(raw))
+        status_screen = flat(tty.out)
+        assert "[INACTIVE]" in status_screen, status_screen[-2000:]
+        tty.quit()
+        assert tty.p.returncode == 0
+    finally:
+        if tty.p.poll() is None:
+            tty.p.kill()
+            tty.p.wait()
+
+check_tui()
+PY
+if [[ "$rc" -ne 0 && "$rc" -ne 77 ]]; then
+  exit "$rc"
+fi
+mv "$saved_parity_init" "$MARE_HOME/config/init.lua"
+rm -f "$tmp_root/work/unsupported-hooks.json"
 
 # 2. PermissionRequest deny
 export PARITY_MODE="perm-deny"
