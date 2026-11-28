@@ -6,8 +6,10 @@ local before_each = mare.test.before_each
 local after_each = mare.test.after_each
 local expect = mare.test.expect
 
-support.preload_modules("schedule", { "schedule.policy", "schedule.scheduler" })
+support.preload_modules("schedule", { "schedule.policy", "schedule.scheduler", "schedule.interface" })
+local policy = require("schedule.policy")
 local make_scheduler = require("schedule.scheduler")
+local make_interface = require("schedule.interface")
 
 describe("schedule /loop scheduler", function()
 	local now, timers, listeners, current, calls, loop_notices, identity
@@ -239,6 +241,61 @@ describe("schedule /loop scheduler", function()
 		expect.eq(scheduler.list()[1].status, "expired")
 		expect.falsy(control("resume", expiring))
 		expect.truthy(control("stop", expiring))
+	end)
+
+	it("rejects /loop intervals of 7d or longer while 6d fires once before 7d expiry", function()
+		local seven_days = 7 * 24 * 60 * 60000
+		local eight_days = 8 * 24 * 60 * 60000
+		local six_days = 6 * 24 * 60 * 60000
+
+		for _, spec in ipairs({ "7d", "8d", "104249992d" }) do
+			local parsed, perr = policy.interval(spec)
+			expect.eq(parsed, nil)
+			expect.truthy(perr and (perr:find("7%-day") or perr:find("seven%-day")))
+		end
+
+		for _, ms in ipairs({ seven_days, eight_days }) do
+			local created, cerr = scheduler.create(nil, nil, "too infrequent", ms)
+			expect.eq(created, nil)
+			expect.truthy(cerr and (cerr:find("7%-day") or cerr:find("seven%-day")))
+		end
+
+		local loop_cmd
+		local ui_notices = {}
+		local orig_notify = mare.ui.notify
+		mare.ui.notify = function(msg, level)
+			ui_notices[#ui_notices + 1] = { msg = msg, level = level }
+		end
+		local iface_ctx = {
+			commands = {
+				register = function(_, name, def)
+					if name == "loop" then
+						loop_cmd = def
+					end
+				end,
+			},
+			tools = { register = function() end },
+		}
+		make_interface(iface_ctx, scheduler)
+		loop_cmd.run("7d check dashboard")
+		expect.eq(#scheduler.list(), 0)
+		expect.eq(ui_notices[#ui_notices].level, "error")
+		expect.truthy(ui_notices[#ui_notices].msg:find("7%-day") or ui_notices[#ui_notices].msg:find("seven%-day"))
+		loop_cmd.run("8d check dashboard")
+		expect.eq(#scheduler.list(), 0)
+		expect.eq(ui_notices[#ui_notices].level, "error")
+		mare.ui.notify = orig_notify
+
+		expect.eq(policy.interval("6d"), six_days)
+		local id6 = create("six days", six_days)
+		advance(six_days - 1)
+		expect.eq(#calls, 0)
+		advance(1)
+		expect.eq(#calls, 1)
+		finish()
+		advance(24 * 60 * 60000)
+		expect.eq(scheduler.list()[1].status, "expired")
+		expect.truthy(control("stop", id6))
 	end)
 
 	it(

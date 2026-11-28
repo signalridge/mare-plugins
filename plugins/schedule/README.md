@@ -37,7 +37,7 @@ Model tools:
 - `schedule_list`, `schedule_view`, and `schedule_edit`: manage durable definitions (delegated subagents with `mare.agent_id` are rejected with `subagent_session`).
 - `schedule_set_next_delay`: requires `task_id`, `revision`, `run_token`, `delay_ms` (`60000..3600000`), and `reason`. Adjusts the next delay for a running adaptive `/loop` task.
 
-Temporary `/loop` tasks stay session-only and expire after seven days; durable `/schedule` definitions do not expire after seven days.
+Temporary `/loop` tasks stay session-only and expire after seven days (fixed intervals of seven days or longer are rejected because they cannot fire within that lifetime); durable `/schedule` definitions do not expire after seven days.
 
 ## Targets, error codes, and delivery stages
 

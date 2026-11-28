@@ -9,8 +9,11 @@ function M.interval(text)
 		return nil, "Interval must be an integer followed by s, m, h or d"
 	end
 	local value = tonumber(amount) * ({ s = 1000, m = 60000, h = 3600000, d = 86400000 })[unit]
-	if value < M.minimum or value > 9007199254740991 or value % 1 ~= 0 then
-		return nil, "Interval must be at least one minute and fit in a safe integer"
+	if value < M.minimum or value % 1 ~= 0 then
+		return nil, "Interval must be at least one minute"
+	end
+	if value >= M.lifetime then
+		return nil, "Interval must be less than the 7-day task lifetime"
 	end
 	return value
 end
