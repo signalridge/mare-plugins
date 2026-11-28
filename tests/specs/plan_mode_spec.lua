@@ -946,7 +946,12 @@ describe("plan-mode", function()
 		-- Rule 5: unconfined asks without amendment (before side_effect check)
 		local mcp_vote = vote_gate({ name = "mcp_read", arguments = {} }, { side_effect = "read", unconfined = true })
 		assert(mcp_vote.decision == "ask" and mcp_vote.amendment == nil)
-		-- Rule 6: local write denied
+		-- Rule 6: todo_write gets a tool-specific denial; other local writes get generic denial
+		local todo_vote = vote_gate({ name = "todo_write", arguments = {} }, { side_effect = "write" })
+		assert(
+			todo_vote.decision == "deny"
+				and todo_vote.reason == "todo_write is a checklist tool and cannot run in plan mode"
+		)
 		assert(vote_gate({ name = "apply_patch", arguments = {} }, { side_effect = "write" }).decision == "deny")
 		-- Rule 7: bash/powershell narrows only write dimension, leaves network open for intersection, preserves accept_partial/readable/deny_read
 		gate_sandbox_current = nil
@@ -1017,8 +1022,120 @@ describe("plan-mode", function()
 		expect.match(mare.json.encode(soft_banner), "PLAN — soft guidance")
 		for _, fn in ipairs(soft_events["tool/before"] or {}) do
 			expect.eq(fn({ name = "write", arguments = {} }, { side_effect = "write" }), nil)
+			expect.eq(fn({ name = "todo_write", arguments = {} }, { side_effect = "write" }), nil)
 		end
 	end)
+
+	it(
+		"routes todo_write through the real plan-mode gate for default enforce, allow_tools, and enforce = false",
+		function()
+			local todo_plugin = support.load_plugin("todo", { "todo.model", "todo.view" })
+			local function run_case(opts)
+				local bus, tools, recs, todo_svc = {}, {}, {}, nil
+				local cfg = {
+					section = plugin.config_schema.section.default,
+					enforce = opts.enforce,
+					allow_tools = opts.allow_tools or {},
+				}
+				local session = {
+					info = function()
+						return { session_id = "s-gate-todo", session_epoch = "g1", readonly = false, ephemeral = false }
+					end,
+					list_records = function()
+						return { data = recs }
+					end,
+					add_record = function(_, kind, data)
+						table.insert(recs, { kind = kind, data = data })
+						return { durable = true }
+					end,
+				}
+				local shared_ctx = {
+					session = session,
+					context = { invalidate = function() end, section = function() end },
+					ui = { invalidate = function() end, widget = function() end },
+					commands = {
+						register = function(_, name, def)
+							bus["_cmd:" .. name] = def
+						end,
+					},
+					tools = {
+						register = function(_, name, def)
+							tools[name] = def
+						end,
+					},
+					agent = {
+						get = function()
+							return { busy = false, queued = 0 }
+						end,
+						step_preview = function()
+							return nil
+						end,
+						step_state = function()
+							return nil
+						end,
+						step_participant = function() end,
+						register_activity = function() end,
+						notify = function() end,
+						steer = function() end,
+						prompt = function() end,
+					},
+					on = function(_, name, fn)
+						bus[name] = bus[name] or {}
+						table.insert(bus[name], fn)
+					end,
+					emit = function() end,
+					effect = function(_, setup)
+						setup()
+					end,
+					spawn = spawn,
+					provide = function(self, name, svc)
+						self[name] = svc
+						if name == "todo" then
+							todo_svc = svc
+						end
+					end,
+				}
+				plugin.apply(shared_ctx, cfg)
+				todo_plugin.apply(shared_ctx, { allow_parallel_in_progress = false })
+				bus["_cmd:plan"].run("on")
+				assert(shared_ctx.plan_mode:active())
+
+				local todo_def = assert(tools.todo_write)
+				local call = {
+					id = "tc1",
+					name = "todo_write",
+					arguments = { todos = mare.json.array({ { content = opts.label, status = "pending" } }) },
+				}
+				local gate_verdict
+				for _, voter in ipairs(bus["tool/before"] or {}) do
+					local v = voter(call, { side_effect = todo_def.side_effect })
+					if v ~= nil then
+						gate_verdict = v
+						break
+					end
+				end
+				if gate_verdict and gate_verdict.decision == "deny" then
+					return gate_verdict, todo_svc.snapshot()
+				end
+				local res = todo_def.execute(call.arguments, { cancel = mare.task.token() })
+				return res, todo_svc.snapshot()
+			end
+
+			local deny_verdict, snap_denied = run_case({ enforce = true, allow_tools = {}, label = "blocked-task" })
+			expect.eq(deny_verdict.decision, "deny")
+			expect.eq(deny_verdict.reason, "todo_write is a checklist tool and cannot run in plan mode")
+			expect.eq(snap_denied.todos, mare.json.null)
+
+			local allow_list_res, snap_allow_list =
+				run_case({ enforce = true, allow_tools = { "todo_write" }, label = "allowed-by-list" })
+			expect.falsy(allow_list_res.is_error)
+			expect.eq(snap_allow_list.todos[1].content, "allowed-by-list")
+
+			local soft_res, snap_soft = run_case({ enforce = false, allow_tools = {}, label = "allowed-soft" })
+			expect.falsy(soft_res.is_error)
+			expect.eq(snap_soft.todos[1].content, "allowed-soft")
+		end
+	)
 
 	it("skips ctx.session:entries() when committed.active is false on session build", function()
 		local state_factory = require("plan_mode.state")

@@ -11,7 +11,7 @@ Whole-list session task checklists with diff tracking, a collapsible `above-edit
 - `todo_write`:
   - Required: `todos` (complete array replacing any previous list; pass `[]` to clear). Each entry requires `content` (`string`) and `status` (`"pending" | "in_progress" | "completed"`).
   - Optional: `explanation` (`string`).
-  - Rejects writes in child sessions (`tool_context_unavailable`), read-only sessions (`readonly_session`), or while `plan_mode` is active (`plan_mode_active`).
+  - Rejects writes in child sessions (`tool_context_unavailable`), read-only sessions (`readonly_session`), or when blocked by the `plan-mode` gate while `plan_mode` is active with `enforce = true` (`todo_write` is excluded from plan mode unless `enforce = false` or listed in `allow_tools`).
 
 ## Lua service (`todo`)
 

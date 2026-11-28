@@ -50,8 +50,6 @@ return {
 		},
 	},
 	apply = function(ctx, cfg)
-		-- plan_mode is optional: follow it while its provider is available.
-		local plan_mode_of = require("mare_lib").follow(ctx, "plan_mode")
 		local model, view = require("todo.model"), require("todo.view")
 		local state = { todos = nil, collapsed = true }
 		local pending_clear
@@ -156,14 +154,6 @@ return {
 			},
 			render = view.render,
 			execute = function(args, tctx)
-				local plan_mode = plan_mode_of()
-				if plan_mode and plan_mode:active() then
-					return {
-						content = "todo_write is a checklist tool and cannot run in plan mode",
-						is_error = true,
-						error_code = "plan_mode_active",
-					}
-				end
 				if args.explanation ~= nil and type(args.explanation) ~= "string" then
 					error("explanation must be a string")
 				end
